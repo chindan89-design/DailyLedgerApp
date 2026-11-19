@@ -17,7 +17,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var dbHelper: DatabaseHelper
     private lateinit var etDate: EditText
-    private lateinit var etName: EditText
+    private lateinit var etName: AutoCompleteTextView
     private lateinit var etQuantity: EditText
     private lateinit var etRate: EditText
     private lateinit var etAmount: EditText
@@ -47,17 +47,12 @@ class MainActivity : AppCompatActivity() {
             tvSummary = findViewById(R.id.tvSummary)
             lvItems = findViewById(R.id.lvItems)
 
-            val btnSave: Button = findViewById(R.id.btnSave)
-            val btnExport: Button = findViewById(R.id.btnExport)
-            val btnPage2: Button = findViewById(R.id.btnGoCreditReceived)
-            val btnPage3: Button = findViewById(R.id.btnGoClosingSheet)
-                        val btnPage4: Button = findViewById(R.id.btnGoCustomerCreation)
-            btnPage4.setOnClickListener { startActivity(Intent(this, CustomerCreationActivity::class.java)) }
-            
-
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
             etDate.setText(sdf.format(Date()))
             etDate.setOnClickListener { showDatePicker() }
+
+            refreshCustomerCombo()
+            etName.setOnClickListener { etName.showDropDown() }
 
             etName.addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) {
@@ -89,10 +84,11 @@ class MainActivity : AppCompatActivity() {
             etQuantity.addTextChangedListener(calcWatcher)
             etRate.addTextChangedListener(calcWatcher)
 
-            btnSave.setOnClickListener { saveEntry() }
-            btnExport.setOnClickListener { exportToCsv() }
-            btnPage2.setOnClickListener { startActivity(Intent(this, CreditReceivedActivity::class.java)) }
-            btnPage3.setOnClickListener { startActivity(Intent(this, ClosingSheetActivity::class.java)) }
+            findViewById<Button>(R.id.btnSave).setOnClickListener { saveEntry() }
+            findViewById<Button>(R.id.btnExport).setOnClickListener { exportToCsv() }
+            findViewById<Button>(R.id.btnGoCreditReceived).setOnClickListener { startActivity(Intent(this, CreditReceivedActivity::class.java)) }
+            findViewById<Button>(R.id.btnGoClosingSheet).setOnClickListener { startActivity(Intent(this, ClosingSheetActivity::class.java)) }
+            findViewById<Button>(R.id.btnGoCustomerCreation).setOnClickListener { startActivity(Intent(this, CustomerCreationActivity::class.java)) }
 
             lvItems.setOnItemLongClickListener { _, _, position, _ ->
                 val selected = itemList[position]
@@ -107,11 +103,28 @@ class MainActivity : AppCompatActivity() {
                     .show()
                 true
             }
+
             loadItems()
-            dbHelper.syncFromCloud { runOnUiThread { refreshCustomerCombo(); loadItems() } }
+            dbHelper.syncFromCloud {
+                runOnUiThread {
+                    refreshCustomerCombo()
+                    loadItems()
+                }
+            }
         } catch (e: Exception) {
             Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshCustomerCombo()
+    }
+
+    private fun refreshCustomerCombo() {
+        val customers = mutableListOf("CASH")
+        customers.addAll(dbHelper.getDistinctCreditCustomers())
+        etName.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, customers.distinct()))
     }
 
     private fun showDatePicker() {
@@ -145,6 +158,7 @@ class MainActivity : AppCompatActivity() {
             etAmount.text.clear()
             rbCredit.isChecked = true
             etName.requestFocus()
+            refreshCustomerCombo()
             loadItems()
         }
     }
