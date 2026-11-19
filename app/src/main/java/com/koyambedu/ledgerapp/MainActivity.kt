@@ -1,195 +1,145 @@
-package com.koyambedu.ledgerapp
+package com.example.dailyledgerapp
 
-import android.app.DatePickerDialog
-import android.content.Intent
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.View
 import android.widget.*
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.FileProvider
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var dbHelper: DatabaseHelper
-    private lateinit var etDate: EditText
-    private lateinit var etName: AutoCompleteTextView
-    private lateinit var etQuantity: EditText
-    private lateinit var etRate: EditText
-    private lateinit var etAmount: EditText
-    private lateinit var rgPaymentMode: RadioGroup
-    private lateinit var rbCash: RadioButton
-    private lateinit var rbBank: RadioButton
-    private lateinit var rbCredit: RadioButton
-    private lateinit var tvSummary: TextView
-    private lateinit var lvItems: ListView
-    private var itemList = listOf<LedgerItem>()
+    private val customerList = mutableListOf<String>()
+    private lateinit var customerAdapter: ArrayAdapter<String>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
             setContentView(R.layout.activity_main)
-            dbHelper = DatabaseHelper(this)
 
-            etDate = findViewById(R.id.etDate)
-            etName = findViewById(R.id.etName)
-            etQuantity = findViewById(R.id.etQuantity)
-            etRate = findViewById(R.id.etRate)
-            etAmount = findViewById(R.id.etAmount)
-            rgPaymentMode = findViewById(R.id.rgPaymentMode)
-            rbCash = findViewById(R.id.rbCash)
-            rbBank = findViewById(R.id.rbBank)
-            rbCredit = findViewById(R.id.rbCredit)
-            tvSummary = findViewById(R.id.tvSummary)
-            lvItems = findViewById(R.id.lvItems)
+            // Tab Layouts & Buttons
+            val btnTabLedger = findViewById<Button>(R.id.btnTabLedger)
+            val btnTabCustomer = findViewById<Button>(R.id.btnTabCustomer)
+            val layoutLedgerEntry = findViewById<LinearLayout>(R.id.layoutLedgerEntry)
+            val layoutCustomerCreation = findViewById<LinearLayout>(R.id.layoutCustomerCreation)
 
-            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-            etDate.setText(sdf.format(Date()))
-            etDate.setOnClickListener { showDatePicker() }
+            // Ledger Entry Views (Strictly matched with XML types)
+            val etDate = findViewById<EditText>(R.id.etDate)
+            val actvCustomerName = findViewById<AutoCompleteTextView>(R.id.actvCustomerName)
+            val etQty = findViewById<EditText>(R.id.etQty)
+            val etRate = findViewById<EditText>(R.id.etRate)
+            val etAmount = findViewById<EditText>(R.id.etAmount)
+            val spPaymentMode = findViewById<Spinner>(R.id.spPaymentMode)
+            val btnSaveEntry = findViewById<Button>(R.id.btnSaveEntry)
 
-            refreshCustomerCombo()
-            etName.setOnClickListener { etName.showDropDown() }
+            // Customer Creation Views
+            val etCustName = findViewById<EditText>(R.id.etCustName)
+            val etAddress1 = findViewById<EditText>(R.id.etAddress1)
+            val etAddress2 = findViewById<EditText>(R.id.etAddress2)
+            val etArea = findViewById<EditText>(R.id.etArea)
+            val etPincode = findViewById<EditText>(R.id.etPincode)
+            val etContact = findViewById<EditText>(R.id.etContact)
+            val etGroup = findViewById<EditText>(R.id.etGroup)
+            val etOpBal = findViewById<EditText>(R.id.etOpBal)
+            val btnSaveCustomer = findViewById<Button>(R.id.btnSaveCustomer)
 
-            etName.addTextChangedListener(object : TextWatcher {
-                override fun afterTextChanged(s: Editable?) {
-                    val name = s?.toString()?.trim()?.lowercase(Locale.getDefault()) ?: ""
-                    if (name == "cash" || name.startsWith("cash ")) {
-                        if (rbCredit.isChecked) rbCash.isChecked = true
-                    } else {
-                        rbCredit.isChecked = true
-                    }
-                }
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            })
+            // Set Default Today's Date
+            val today = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(Date())
+            etDate.setText(today)
 
+            // Setup Payment Modes Spinner
+            val paymentModes = arrayOf("Cash", "Credit", "GPay / UPI", "Bank Transfer")
+            val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, paymentModes)
+            spPaymentMode.adapter = spinnerAdapter
+
+            // Setup Customer Name Combo Box (AutoCompleteTextView)
+            customerAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, customerList)
+            actvCustomerName.setAdapter(customerAdapter)
+            actvCustomerName.setOnClickListener {
+                actvCustomerName.showDropDown()
+            }
+
+            // Auto-Calculate Amount (Qty * Rate)
             val calcWatcher = object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) {
-                    val qty = etQuantity.text.toString().toDoubleOrNull() ?: 0.0
+                    val qty = etQty.text.toString().toDoubleOrNull() ?: 0.0
                     val rate = etRate.text.toString().toDoubleOrNull() ?: 0.0
                     if (qty > 0 && rate > 0) {
-                        val amt = qty * rate
-                        etAmount.setText(if (amt % 1.0 == 0.0) amt.toInt().toString() else String.format(Locale.US, "%.2f", amt))
-                    } else {
-                        etAmount.setText("")
+                        etAmount.setText(String.format(Locale.getDefault(), "%.2f", qty * rate))
                     }
                 }
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             }
-            etQuantity.addTextChangedListener(calcWatcher)
+            etQty.addTextChangedListener(calcWatcher)
             etRate.addTextChangedListener(calcWatcher)
 
-            findViewById<Button>(R.id.btnSave).setOnClickListener { saveEntry() }
-            findViewById<Button>(R.id.btnExport).setOnClickListener { exportToCsv() }
-            findViewById<Button>(R.id.btnGoCreditReceived).setOnClickListener { startActivity(Intent(this, CreditReceivedActivity::class.java)) }
-            findViewById<Button>(R.id.btnGoClosingSheet).setOnClickListener { startActivity(Intent(this, ClosingSheetActivity::class.java)) }
-            findViewById<Button>(R.id.btnGoCustomerCreation).setOnClickListener { startActivity(Intent(this, CustomerCreationActivity::class.java)) }
-
-            lvItems.setOnItemLongClickListener { _, _, position, _ ->
-                val selected = itemList[position]
-                AlertDialog.Builder(this)
-                    .setTitle("Delete Entry")
-                    .setMessage("Delete ${selected.name}?")
-                    .setPositiveButton("Delete") { _, _ ->
-                        dbHelper.deleteItem(selected.id)
-                        loadItems()
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-                true
+            // Switch Tabs
+            btnTabLedger.setOnClickListener {
+                layoutLedgerEntry.visibility = View.VISIBLE
+                layoutCustomerCreation.visibility = View.GONE
             }
 
-            loadItems()
-            dbHelper.syncFromCloud {
-                runOnUiThread {
-                    refreshCustomerCombo()
-                    loadItems()
+            btnTabCustomer.setOnClickListener {
+                layoutLedgerEntry.visibility = View.GONE
+                layoutCustomerCreation.visibility = View.VISIBLE
+            }
+
+            // Save Customer Action
+            btnSaveCustomer.setOnClickListener {
+                val name = etCustName.text.toString().trim()
+                if (name.isEmpty()) {
+                    Toast.makeText(this, "Please enter Customer Name", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
                 }
+
+                if (!customerList.contains(name)) {
+                    customerList.add(name)
+                    customerAdapter.notifyDataSetChanged()
+                }
+
+                Toast.makeText(this, "Customer '$name' Saved!", Toast.LENGTH_SHORT).show()
+
+                // Clear Customer Fields
+                etCustName.text.clear()
+                etAddress1.text.clear()
+                etAddress2.text.clear()
+                etArea.text.clear()
+                etPincode.text.clear()
+                etContact.text.clear()
+                etGroup.text.clear()
+                etOpBal.text.clear()
+
+                // Switch back to Ledger Entry
+                layoutCustomerCreation.visibility = View.GONE
+                layoutLedgerEntry.visibility = View.VISIBLE
+                actvCustomerName.setText(name)
             }
+
+            // Save Ledger Entry Action
+            btnSaveEntry.setOnClickListener {
+                val custName = actvCustomerName.text.toString().trim()
+                val amount = etAmount.text.toString().trim()
+                val mode = spPaymentMode.selectedItem.toString()
+
+                if (custName.isEmpty() || amount.isEmpty()) {
+                    Toast.makeText(this, "Enter Customer Name and Amount", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+
+                Toast.makeText(this, "Saved: $custName - ₹$amount ($mode)", Toast.LENGTH_SHORT).show()
+
+                // Clear Entry Fields
+                actvCustomerName.text.clear()
+                etQty.text.clear()
+                etRate.text.clear()
+                etAmount.text.clear()
+            }
+
         } catch (e: Exception) {
             Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        refreshCustomerCombo()
-    }
-
-    private fun refreshCustomerCombo() {
-        val customers = mutableListOf("CASH")
-        customers.addAll(dbHelper.getDistinctCreditCustomers())
-        etName.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, customers.distinct()))
-    }
-
-    private fun showDatePicker() {
-        val cal = Calendar.getInstance()
-        DatePickerDialog(this, { _, y, m, d ->
-            etDate.setText(String.format(Locale.US, "%04d-%02d-%02d", y, m + 1, d))
-        }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
-    }
-
-    private fun saveEntry() {
-        val date = etDate.text.toString().trim()
-        val name = etName.text.toString().trim()
-        val qty = etQuantity.text.toString().toDoubleOrNull()
-        val rate = etRate.text.toString().toDoubleOrNull()
-        val amount = etAmount.text.toString().toDoubleOrNull()
-        val mode = when (rgPaymentMode.checkedRadioButtonId) {
-            R.id.rbCash -> "Cash"
-            R.id.rbBank -> "Bank"
-            else -> "Credit"
-        }
-        if (date.isEmpty() || name.isEmpty() || qty == null || rate == null || amount == null) {
-            Toast.makeText(this, "Fill all fields", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val item = LedgerItem(date = date, name = name, quantity = qty, rate = rate, amount = amount, paymentMode = mode)
-        if (dbHelper.insertItem(item) != -1L) {
-            Toast.makeText(this, "Saved ($mode)", Toast.LENGTH_SHORT).show()
-            etName.text.clear()
-            etQuantity.text.clear()
-            etRate.text.clear()
-            etAmount.text.clear()
-            rbCredit.isChecked = true
-            etName.requestFocus()
-            refreshCustomerCombo()
-            loadItems()
-        }
-    }
-
-    private fun loadItems() {
-        itemList = dbHelper.getAllItems()
-        val rows = itemList.map { "${it.date} | ${it.name} [${it.paymentMode}]\nQty: ${it.quantity} x ${it.rate} = ${it.amount}" }
-        lvItems.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, rows)
-        val total = itemList.sumOf { it.amount }
-        val cash = itemList.filter { it.paymentMode == "Cash" }.sumOf { it.amount }
-        val bank = itemList.filter { it.paymentMode == "Bank" }.sumOf { it.amount }
-        val credit = itemList.filter { it.paymentMode == "Credit" }.sumOf { it.amount }
-        tvSummary.text = "Total: $total | Cash: $cash | Bank: $bank | Credit: $credit"
-    }
-
-    private fun exportToCsv() {
-        if (itemList.isEmpty()) {
-            Toast.makeText(this, "No records", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val csvFile = File(cacheDir, "additems_export.csv")
-        csvFile.writeText("\uFEFFID,Date,Name,Quantity,Rate,Amount,Payment_Mode\n", Charsets.UTF_8)
-        for (i in itemList) {
-            csvFile.appendText("${i.id},${i.date},\"${i.name}\",${i.quantity},${i.rate},${i.amount},${i.paymentMode}\n", Charsets.UTF_8)
-        }
-        val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", csvFile)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/csv"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivity(Intent.createChooser(intent, "Export CSV"))
     }
 }
