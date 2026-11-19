@@ -51,6 +51,9 @@ class MainActivity : AppCompatActivity() {
             val btnExport: Button = findViewById(R.id.btnExport)
             val btnPage2: Button = findViewById(R.id.btnGoCreditReceived)
             val btnPage3: Button = findViewById(R.id.btnGoClosingSheet)
+                        val btnPage4: Button = findViewById(R.id.btnGoCustomerCreation)
+            btnPage4.setOnClickListener { startActivity(Intent(this, CustomerCreationActivity::class.java)) }
+            
 
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
             etDate.setText(sdf.format(Date()))
