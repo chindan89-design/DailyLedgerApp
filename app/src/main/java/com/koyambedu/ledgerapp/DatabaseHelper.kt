@@ -6,21 +6,32 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 data class LedgerItem(
-    val id: Int = 0,
+    val id: Long = 0,
     val date: String,
     val name: String,
     val quantity: Double,
     val rate: Double,
     val amount: Double,
-    val paymentMode: String // "Cash", "Bank", "Credit"
+    val paymentMode: String
 )
 
 data class CreditReceivedItem(
-    val id: Int = 0,
+    val id: Long = 0,
     val date: String,
     val customerName: String,
-    val paymentMode: String, // "Cash", "Bank", "Adjustment"
+    val paymentMode: String,
     val amount: Double
+)
+
+data class CustomerMaster(
+    val name: String,
+    val address1: String,
+    val address2: String,
+    val area: String,
+    val pincode: String,
+    val contact: String,
+    val group: String,
+    val opBal: Double
 )
 
 data class CustomerStatementRow(
@@ -47,101 +58,127 @@ data class CustomerRangeSummaryRow(
     val closingBalance: Double
 )
 
-class DatabaseHelper(context: Context) :
-    SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
-
-    companion object {
-        private const val DATABASE_NAME = "DailyLedger.db"
-        private const val DATABASE_VERSION = 1
-
-        // Page 1 Table: additems
-        const val TABLE_ADD_ITEMS = "additems"
-        const val COL_ID = "id"
-        const val COL_DATE = "date"
-        const val COL_NAME = "name"
-        const val COL_QTY = "quantity"
-        const val COL_RATE = "rate"
-        const val COL_AMOUNT = "amount"
-        const val COL_PAYMENT_MODE = "payment_mode"
-
-        // Page 2 Table: credit_received
-        const val TABLE_CREDIT_RECEIVED = "credit_received"
-        const val COL_CR_ID = "id"
-        const val COL_CR_DATE = "date"
-        const val COL_CR_CUSTOMER = "customer_name"
-        const val COL_CR_MODE = "payment_mode"
-        const val COL_CR_AMOUNT = "amount"
-
-        // Page 3 Base Opening Balance Table
-        const val TABLE_OPENING = "customer_opening"
-        const val COL_OP_CUSTOMER = "customer_name"
-        const val COL_OP_AMOUNT = "opening_amount"
-    }
+class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.db", null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
-            CREATE TABLE $TABLE_ADD_ITEMS (
-                $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                $COL_DATE TEXT NOT NULL,
-                $COL_NAME TEXT NOT NULL,
-                $COL_QTY REAL NOT NULL,
-                $COL_RATE REAL NOT NULL,
-                $COL_AMOUNT REAL NOT NULL,
-                $COL_PAYMENT_MODE TEXT NOT NULL
+            CREATE TABLE additems (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                name TEXT NOT NULL,
+                quantity REAL NOT NULL,
+                rate REAL NOT NULL,
+                amount REAL NOT NULL,
+                payment_mode TEXT NOT NULL DEFAULT 'Credit'
             )
         """.trimIndent())
 
         db.execSQL("""
-            CREATE TABLE $TABLE_CREDIT_RECEIVED (
-                $COL_CR_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                $COL_CR_DATE TEXT NOT NULL,
-                $COL_CR_CUSTOMER TEXT NOT NULL,
-                $COL_CR_MODE TEXT NOT NULL,
-                $COL_CR_AMOUNT REAL NOT NULL
+            CREATE TABLE credit_received (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                customer_name TEXT NOT NULL,
+                payment_mode TEXT NOT NULL,
+                amount REAL NOT NULL
             )
         """.trimIndent())
 
         db.execSQL("""
-            CREATE TABLE $TABLE_OPENING (
-                $COL_OP_CUSTOMER TEXT PRIMARY KEY,
-                $COL_OP_AMOUNT REAL NOT NULL
+            CREATE TABLE customer_opening (
+                customer_name TEXT PRIMARY KEY COLLATE NOCASE,
+                opening_balance REAL NOT NULL DEFAULT 0,
+                address1 TEXT DEFAULT '',
+                address2 TEXT DEFAULT '',
+                area TEXT DEFAULT '',
+                pincode TEXT DEFAULT '',
+                contact TEXT DEFAULT '',
+                cust_group TEXT DEFAULT ''
             )
         """.trimIndent())
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_ADD_ITEMS")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_CREDIT_RECEIVED")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_OPENING")
-        onCreate(db)
+        if (oldVersion < 2) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS credit_received (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, customer_name TEXT NOT NULL, payment_mode TEXT NOT NULL, amount REAL NOT NULL)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS customer_opening (customer_name TEXT PRIMARY KEY COLLATE NOCASE, opening_balance REAL NOT NULL DEFAULT 0)")
+        }
+        if (oldVersion < 3) {
+            val cols = listOf("address1", "address2", "area", "pincode", "contact", "cust_group")
+            for (col in cols) {
+                try {
+                    db.execSQL("ALTER TABLE customer_opening ADD COLUMN $col TEXT DEFAULT ''")
+                } catch (_: Exception) {}
+            }
+        }
     }
 
-    // --- PAGE 1: additems ---
+    fun saveCustomerMaster(c: CustomerMaster) {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put("customer_name", c.name.trim())
+            put("opening_balance", c.opBal)
+            put("address1", c.address1)
+            put("address2", c.address2)
+            put("area", c.area)
+            put("pincode", c.pincode)
+            put("contact", c.contact)
+            put("cust_group", c.group)
+        }
+        db.insertWithOnConflict("customer_opening", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    fun getAllCustomerMasters(): List<CustomerMaster> {
+        val list = mutableListOf<CustomerMaster>()
+        val cursor = readableDatabase.rawQuery("SELECT * FROM customer_opening ORDER BY customer_name ASC", null)
+        cursor.use {
+            while (it.moveToNext()) {
+                list.add(
+                    CustomerMaster(
+                        name = it.getString(it.getColumnIndexOrThrow("customer_name")),
+                        address1 = it.getString(it.getColumnIndexOrThrow("address1")) ?: "",
+                        address2 = it.getString(it.getColumnIndexOrThrow("address2")) ?: "",
+                        area = it.getString(it.getColumnIndexOrThrow("area")) ?: "",
+                        pincode = it.getString(it.getColumnIndexOrThrow("pincode")) ?: "",
+                        contact = it.getString(it.getColumnIndexOrThrow("contact")) ?: "",
+                        group = it.getString(it.getColumnIndexOrThrow("cust_group")) ?: "",
+                        opBal = it.getDouble(it.getColumnIndexOrThrow("opening_balance"))
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    fun deleteCustomerMaster(name: String) {
+        writableDatabase.delete("customer_opening", "LOWER(customer_name) = LOWER(?)", arrayOf(name.trim()))
+    }
+
     fun insertItem(item: LedgerItem): Long {
         val values = ContentValues().apply {
-            put(COL_DATE, item.date)
-            put(COL_NAME, item.name)
-            put(COL_QTY, item.quantity)
-            put(COL_RATE, item.rate)
-            put(COL_AMOUNT, item.amount)
-            put(COL_PAYMENT_MODE, item.paymentMode)
+            put("date", item.date)
+            put("name", item.name)
+            put("quantity", item.quantity)
+            put("rate", item.rate)
+            put("amount", item.amount)
+            put("payment_mode", item.paymentMode)
         }
-        return writableDatabase.insert(TABLE_ADD_ITEMS, null, values)
+        return writableDatabase.insert("additems", null, values)
     }
 
     fun getAllItems(): List<LedgerItem> {
         val list = mutableListOf<LedgerItem>()
-        readableDatabase.rawQuery("SELECT * FROM $TABLE_ADD_ITEMS ORDER BY $COL_ID DESC", null).use { c ->
-            while (c.moveToNext()) {
+        val cursor = readableDatabase.rawQuery("SELECT * FROM additems ORDER BY id DESC", null)
+        cursor.use {
+            while (it.moveToNext()) {
                 list.add(
                     LedgerItem(
-                        id = c.getInt(c.getColumnIndexOrThrow(COL_ID)),
-                        date = c.getString(c.getColumnIndexOrThrow(COL_DATE)),
-                        name = c.getString(c.getColumnIndexOrThrow(COL_NAME)),
-                        quantity = c.getDouble(c.getColumnIndexOrThrow(COL_QTY)),
-                        rate = c.getDouble(c.getColumnIndexOrThrow(COL_RATE)),
-                        amount = c.getDouble(c.getColumnIndexOrThrow(COL_AMOUNT)),
-                        paymentMode = c.getString(c.getColumnIndexOrThrow(COL_PAYMENT_MODE))
+                        id = it.getLong(it.getColumnIndexOrThrow("id")),
+                        date = it.getString(it.getColumnIndexOrThrow("date")),
+                        name = it.getString(it.getColumnIndexOrThrow("name")),
+                        quantity = it.getDouble(it.getColumnIndexOrThrow("quantity")),
+                        rate = it.getDouble(it.getColumnIndexOrThrow("rate")),
+                        amount = it.getDouble(it.getColumnIndexOrThrow("amount")),
+                        paymentMode = it.getString(it.getColumnIndexOrThrow("payment_mode")) ?: "Credit"
                     )
                 )
             }
@@ -149,32 +186,32 @@ class DatabaseHelper(context: Context) :
         return list
     }
 
-    fun deleteItem(id: Int): Int {
-        return writableDatabase.delete(TABLE_ADD_ITEMS, "$COL_ID = ?", arrayOf(id.toString()))
+    fun deleteItem(id: Long) {
+        writableDatabase.delete("additems", "id = ?", arrayOf(id.toString()))
     }
 
-    // --- PAGE 2: credit_received ---
     fun insertCreditReceived(entry: CreditReceivedItem): Long {
         val values = ContentValues().apply {
-            put(COL_CR_DATE, entry.date)
-            put(COL_CR_CUSTOMER, entry.customerName)
-            put(COL_CR_MODE, entry.paymentMode)
-            put(COL_CR_AMOUNT, entry.amount)
+            put("date", entry.date)
+            put("customer_name", entry.customerName)
+            put("payment_mode", entry.paymentMode)
+            put("amount", entry.amount)
         }
-        return writableDatabase.insert(TABLE_CREDIT_RECEIVED, null, values)
+        return writableDatabase.insert("credit_received", null, values)
     }
 
     fun getAllCreditReceived(): List<CreditReceivedItem> {
         val list = mutableListOf<CreditReceivedItem>()
-        readableDatabase.rawQuery("SELECT * FROM $TABLE_CREDIT_RECEIVED ORDER BY $COL_CR_ID DESC", null).use { c ->
-            while (c.moveToNext()) {
+        val cursor = readableDatabase.rawQuery("SELECT * FROM credit_received ORDER BY id DESC", null)
+        cursor.use {
+            while (it.moveToNext()) {
                 list.add(
                     CreditReceivedItem(
-                        id = c.getInt(c.getColumnIndexOrThrow(COL_CR_ID)),
-                        date = c.getString(c.getColumnIndexOrThrow(COL_CR_DATE)),
-                        customerName = c.getString(c.getColumnIndexOrThrow(COL_CR_CUSTOMER)),
-                        paymentMode = c.getString(c.getColumnIndexOrThrow(COL_CR_MODE)),
-                        amount = c.getDouble(c.getColumnIndexOrThrow(COL_CR_AMOUNT))
+                        id = it.getLong(it.getColumnIndexOrThrow("id")),
+                        date = it.getString(it.getColumnIndexOrThrow("date")),
+                        customerName = it.getString(it.getColumnIndexOrThrow("customer_name")),
+                        paymentMode = it.getString(it.getColumnIndexOrThrow("payment_mode")),
+                        amount = it.getDouble(it.getColumnIndexOrThrow("amount"))
                     )
                 )
             }
@@ -182,152 +219,125 @@ class DatabaseHelper(context: Context) :
         return list
     }
 
-    fun deleteCreditReceived(id: Int): Int {
-        return writableDatabase.delete(TABLE_CREDIT_RECEIVED, "$COL_CR_ID = ?", arrayOf(id.toString()))
+    fun deleteCreditReceived(id: Long) {
+        writableDatabase.delete("credit_received", "id = ?", arrayOf(id.toString()))
     }
 
     fun getDistinctCreditCustomers(): List<String> {
-        val customers = mutableSetOf<String>()
-        readableDatabase.rawQuery("SELECT $COL_OP_CUSTOMER FROM $TABLE_OPENING", null).use { c ->
-            while (c.moveToNext()) customers.add(c.getString(0))
+        val names = linkedSetOf<String>()
+        val db = readableDatabase
+        db.rawQuery("SELECT DISTINCT customer_name FROM customer_opening", null).use {
+            while (it.moveToNext()) names.add(it.getString(0).trim())
         }
-        readableDatabase.rawQuery(
-            "SELECT DISTINCT $COL_NAME FROM $TABLE_ADD_ITEMS WHERE LOWER($COL_NAME) NOT LIKE 'cash%'", null
-        ).use { c ->
-            while (c.moveToNext()) customers.add(c.getString(0))
+        db.rawQuery("SELECT DISTINCT name FROM additems WHERE payment_mode = 'Credit' AND LOWER(TRIM(name)) != 'cash'", null).use {
+            while (it.moveToNext()) names.add(it.getString(0).trim())
         }
-        readableDatabase.rawQuery("SELECT DISTINCT $COL_CR_CUSTOMER FROM $TABLE_CREDIT_RECEIVED", null).use { c ->
-            while (c.moveToNext()) customers.add(c.getString(0))
+        db.rawQuery("SELECT DISTINCT customer_name FROM credit_received", null).use {
+            while (it.moveToNext()) names.add(it.getString(0).trim())
         }
-        return customers.toList().sorted()
+        return names.sorted()
     }
 
     fun getCustomerBalance(customerName: String): Double {
-        var baseOpen = 0.0
-        var totalCreditSales = 0.0
-        var totalReceived = 0.0
-
-        readableDatabase.rawQuery("SELECT $COL_OP_AMOUNT FROM $TABLE_OPENING WHERE $COL_OP_CUSTOMER = ?", arrayOf(customerName)).use {
-            if (it.moveToFirst()) baseOpen = it.getDouble(0)
+        val db = readableDatabase
+        val clean = customerName.trim()
+        var initOp = 0.0
+        db.rawQuery("SELECT opening_balance FROM customer_opening WHERE LOWER(TRIM(customer_name)) = LOWER(?)", arrayOf(clean)).use {
+            if (it.moveToFirst()) initOp = it.getDouble(0)
         }
-        readableDatabase.rawQuery(
-            "SELECT SUM($COL_AMOUNT) FROM $TABLE_ADD_ITEMS WHERE $COL_NAME = ? AND $COL_PAYMENT_MODE = 'Credit'",
-            arrayOf(customerName)
-        ).use { if (it.moveToFirst()) totalCreditSales = it.getDouble(0) }
-
-        readableDatabase.rawQuery(
-            "SELECT SUM($COL_CR_AMOUNT) FROM $TABLE_CREDIT_RECEIVED WHERE $COL_CR_CUSTOMER = ?",
-            arrayOf(customerName)
-        ).use { if (it.moveToFirst()) totalReceived = it.getDouble(0) }
-
-        return baseOpen + totalCreditSales - totalReceived
+        var totalCredit = 0.0
+        db.rawQuery("SELECT COALESCE(SUM(amount), 0) FROM additems WHERE LOWER(TRIM(name)) = LOWER(?) AND payment_mode = 'Credit'", arrayOf(clean)).use {
+            if (it.moveToFirst()) totalCredit = it.getDouble(0)
+        }
+        var totalRecvd = 0.0
+        db.rawQuery("SELECT COALESCE(SUM(amount), 0) FROM credit_received WHERE LOWER(TRIM(customer_name)) = LOWER(?)", arrayOf(clean)).use {
+            if (it.moveToFirst()) totalRecvd = it.getDouble(0)
+        }
+        return initOp + totalCredit - totalRecvd
     }
 
-    // --- PAGE 3: Closing Sheet ---
     fun setOpeningBalance(customerName: String, amount: Double) {
-        val values = ContentValues().apply {
-            put(COL_OP_CUSTOMER, customerName.trim())
-            put(COL_OP_AMOUNT, amount)
-        }
-        writableDatabase.insertWithOnConflict(TABLE_OPENING, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        val db = writableDatabase
+        val clean = customerName.trim()
+        db.execSQL(
+            "INSERT INTO customer_opening (customer_name, opening_balance) VALUES (?, ?) ON CONFLICT(customer_name) DO UPDATE SET opening_balance = excluded.opening_balance",
+            arrayOf(clean, amount)
+        )
     }
 
     fun getCustomerStatement(customerName: String, fromDate: String, toDate: String): CustomerStatementReport {
         val db = readableDatabase
-        var baseOpening = 0.0
-        db.rawQuery("SELECT $COL_OP_AMOUNT FROM $TABLE_OPENING WHERE $COL_OP_CUSTOMER = ?", arrayOf(customerName)).use {
-            if (it.moveToFirst()) baseOpening = it.getDouble(0)
+        val clean = customerName.trim()
+        var initialOpening = 0.0
+        db.rawQuery("SELECT opening_balance FROM customer_opening WHERE LOWER(TRIM(customer_name)) = LOWER(?)", arrayOf(clean)).use {
+            if (it.moveToFirst()) initialOpening = it.getDouble(0)
         }
-
         var priorSales = 0.0
-        db.rawQuery(
-            "SELECT SUM($COL_AMOUNT) FROM $TABLE_ADD_ITEMS WHERE $COL_NAME = ? AND $COL_PAYMENT_MODE = 'Credit' AND $COL_DATE < ?",
-            arrayOf(customerName, fromDate)
-        ).use { if (it.moveToFirst()) priorSales = it.getDouble(0) }
+        db.rawQuery("SELECT COALESCE(SUM(amount), 0) FROM additems WHERE LOWER(TRIM(name)) = LOWER(?) AND payment_mode = 'Credit' AND date < ?", arrayOf(clean, fromDate)).use {
+            if (it.moveToFirst()) priorSales = it.getDouble(0)
+        }
+        var priorRecvd = 0.0
+        db.rawQuery("SELECT COALESCE(SUM(amount), 0) FROM credit_received WHERE LOWER(TRIM(customer_name)) = LOWER(?) AND date < ?", arrayOf(clean, fromDate)).use {
+            if (it.moveToFirst()) priorRecvd = it.getDouble(0)
+        }
+        val openingAsOfFromDate = initialOpening + priorSales - priorRecvd
+        var runningBalance = openingAsOfFromDate
 
-        var priorReceived = 0.0
-        db.rawQuery(
-            "SELECT SUM($COL_CR_AMOUNT) FROM $TABLE_CREDIT_RECEIVED WHERE $COL_CR_CUSTOMER = ? AND $COL_CR_DATE < ?",
-            arrayOf(customerName, fromDate)
-        ).use { if (it.moveToFirst()) priorReceived = it.getDouble(0) }
-
-        val openingBalance = baseOpening + priorSales - priorReceived
-        var runningBalance = openingBalance
-
-        data class RawEvent(val date: String, val sortOrder: Int, val id: Int, val qty: Double, val rate: Double, val amount: Double, val received: Double)
+        data class RawEvent(val date: String, val qty: Double, val rate: Double, val amount: Double, val recvd: Double, val sortOrder: Int)
         val events = mutableListOf<RawEvent>()
 
-        db.rawQuery(
-            "SELECT $COL_ID, $COL_DATE, $COL_QTY, $COL_RATE, $COL_AMOUNT FROM $TABLE_ADD_ITEMS WHERE $COL_NAME = ? AND $COL_PAYMENT_MODE = 'Credit' AND $COL_DATE BETWEEN ? AND ?",
-            arrayOf(customerName, fromDate, toDate)
-        ).use { c ->
-            while (c.moveToNext()) {
-                val qty = c.getDouble(2)
-                val rate = c.getDouble(3)
-                val amt = if (c.getDouble(4) > 0) c.getDouble(4) else qty * rate
-                events.add(RawEvent(c.getString(1), 1, c.getInt(0), qty, rate, amt, 0.0))
+        db.rawQuery("SELECT date, quantity, rate, amount FROM additems WHERE LOWER(TRIM(name)) = LOWER(?) AND payment_mode = 'Credit' AND date BETWEEN ? AND ?", arrayOf(clean, fromDate, toDate)).use {
+            while (it.moveToNext()) {
+                events.add(RawEvent(it.getString(0), it.getDouble(1), it.getDouble(2), it.getDouble(3), 0.0, 1))
+            }
+        }
+        db.rawQuery("SELECT date, amount FROM credit_received WHERE LOWER(TRIM(customer_name)) = LOWER(?) AND date BETWEEN ? AND ?", arrayOf(clean, fromDate, toDate)).use {
+            while (it.moveToNext()) {
+                events.add(RawEvent(it.getString(0), 0.0, 0.0, 0.0, it.getDouble(1), 2))
             }
         }
 
-        db.rawQuery(
-            "SELECT $COL_CR_ID, $COL_CR_DATE, $COL_CR_AMOUNT FROM $TABLE_CREDIT_RECEIVED WHERE $COL_CR_CUSTOMER = ? AND $COL_CR_DATE BETWEEN ? AND ?",
-            arrayOf(customerName, fromDate, toDate)
-        ).use { c ->
-            while (c.moveToNext()) {
-                events.add(RawEvent(c.getString(1), 2, c.getInt(0), 0.0, 0.0, 0.0, c.getDouble(2)))
-            }
+        val sortedEvents = events.sortedWith(compareBy({ it.date }, { it.sortOrder }))
+        val rows = sortedEvents.map { ev ->
+            runningBalance = runningBalance + ev.amount - ev.recvd
+            CustomerStatementRow(ev.date, ev.qty, ev.rate, ev.amount, ev.recvd, runningBalance)
         }
-
-        val sortedEvents = events.sortedWith(compareBy({ it.date }, { it.sortOrder }, { it.id }))
-        val rows = mutableListOf<CustomerStatementRow>()
-        for (ev in sortedEvents) {
-            runningBalance = runningBalance + ev.amount - ev.received
-            rows.add(CustomerStatementRow(ev.date, ev.qty, ev.rate, ev.amount, ev.received, runningBalance))
-        }
-        return CustomerStatementReport(customerName, openingBalance, rows, runningBalance)
+        return CustomerStatementReport(clean, openingAsOfFromDate, rows, runningBalance)
     }
 
     fun getAllCustomersClosingRange(fromDate: String, toDate: String): List<CustomerRangeSummaryRow> {
+        val customers = getDistinctCreditCustomers()
         val db = readableDatabase
-        val summaryList = mutableListOf<CustomerRangeSummaryRow>()
+        val result = mutableListOf<CustomerRangeSummaryRow>()
 
-        for (customer in getDistinctCreditCustomers()) {
-            var baseOpening = 0.0
-            db.rawQuery("SELECT $COL_OP_AMOUNT FROM $TABLE_OPENING WHERE $COL_OP_CUSTOMER = ?", arrayOf(customer)).use {
-                if (it.moveToFirst()) baseOpening = it.getDouble(0)
+        for (cust in customers) {
+            var initialOpening = 0.0
+            db.rawQuery("SELECT opening_balance FROM customer_opening WHERE LOWER(TRIM(customer_name)) = LOWER(?)", arrayOf(cust)).use {
+                if (it.moveToFirst()) initialOpening = it.getDouble(0)
             }
-
             var priorSales = 0.0
-            db.rawQuery(
-                "SELECT SUM($COL_AMOUNT) FROM $TABLE_ADD_ITEMS WHERE $COL_NAME = ? AND $COL_PAYMENT_MODE = 'Credit' AND $COL_DATE < ?",
-                arrayOf(customer, fromDate)
-            ).use { if (it.moveToFirst()) priorSales = it.getDouble(0) }
-
-            var priorIncome = 0.0
-            db.rawQuery(
-                "SELECT SUM($COL_CR_AMOUNT) FROM $TABLE_CREDIT_RECEIVED WHERE $COL_CR_CUSTOMER = ? AND $COL_CR_DATE < ?",
-                arrayOf(customer, fromDate)
-            ).use { if (it.moveToFirst()) priorIncome = it.getDouble(0) }
-
-            val openingBal = baseOpening + priorSales - priorIncome
+            db.rawQuery("SELECT COALESCE(SUM(amount), 0) FROM additems WHERE LOWER(TRIM(name)) = LOWER(?) AND payment_mode = 'Credit' AND date < ?", arrayOf(cust, fromDate)).use {
+                if (it.moveToFirst()) priorSales = it.getDouble(0)
+            }
+            var priorRecvd = 0.0
+            db.rawQuery("SELECT COALESCE(SUM(amount), 0) FROM credit_received WHERE LOWER(TRIM(customer_name)) = LOWER(?) AND date < ?", arrayOf(cust, fromDate)).use {
+                if (it.moveToFirst()) priorRecvd = it.getDouble(0)
+            }
+            val opening = initialOpening + priorSales - priorRecvd
 
             var rangeSales = 0.0
-            db.rawQuery(
-                "SELECT SUM($COL_AMOUNT) FROM $TABLE_ADD_ITEMS WHERE $COL_NAME = ? AND $COL_PAYMENT_MODE = 'Credit' AND $COL_DATE BETWEEN ? AND ?",
-                arrayOf(customer, fromDate, toDate)
-            ).use { if (it.moveToFirst()) rangeSales = it.getDouble(0) }
-
+            db.rawQuery("SELECT COALESCE(SUM(amount), 0) FROM additems WHERE LOWER(TRIM(name)) = LOWER(?) AND payment_mode = 'Credit' AND date BETWEEN ? AND ?", arrayOf(cust, fromDate, toDate)).use {
+                if (it.moveToFirst()) rangeSales = it.getDouble(0)
+            }
             var rangeIncome = 0.0
-            db.rawQuery(
-                "SELECT SUM($COL_CR_AMOUNT) FROM $TABLE_CREDIT_RECEIVED WHERE $COL_CR_CUSTOMER = ? AND $COL_CR_DATE BETWEEN ? AND ?",
-                arrayOf(customer, fromDate, toDate)
-            ).use { if (it.moveToFirst()) rangeIncome = it.getDouble(0) }
-
-            val closingBal = openingBal + rangeSales - rangeIncome
-            if (openingBal != 0.0 || rangeSales != 0.0 || rangeIncome != 0.0 || closingBal != 0.0) {
-                summaryList.add(CustomerRangeSummaryRow(customer, openingBal, rangeSales, rangeIncome, closingBal))
+            db.rawQuery("SELECT COALESCE(SUM(amount), 0) FROM credit_received WHERE LOWER(TRIM(customer_name)) = LOWER(?) AND date BETWEEN ? AND ?", arrayOf(cust, fromDate, toDate)).use {
+                if (it.moveToFirst()) rangeIncome = it.getDouble(0)
+            }
+            val closing = opening + rangeSales - rangeIncome
+            if (opening != 0.0 || rangeSales != 0.0 || rangeIncome != 0.0 || closing != 0.0) {
+                result.add(CustomerRangeSummaryRow(cust, opening, rangeSales, rangeIncome, closing))
             }
         }
-        return summaryList
+        return result
     }
 }
