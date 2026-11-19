@@ -108,6 +108,7 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             loadItems()
+            dbHelper.syncFromCloud { runOnUiThread { refreshCustomerCombo(); loadItems() } }
         } catch (e: Exception) {
             Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
