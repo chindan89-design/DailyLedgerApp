@@ -1,5 +1,4 @@
-package com.example.dailyledgerapp
-
+import com.koyambedu.ledgerapp.R
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
