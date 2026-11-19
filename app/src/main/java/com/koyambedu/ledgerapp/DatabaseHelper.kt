@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.google.firebase.firestore.FirebaseFirestore
 
 data class LedgerItem(
     val id: Long = 0,
@@ -60,6 +61,12 @@ data class CustomerRangeSummaryRow(
 
 class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.db", null, 3) {
 
+    private val cloud: FirebaseFirestore? = try {
+        FirebaseFirestore.getInstance()
+    } catch (_: Exception) {
+        null
+    }
+
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
             CREATE TABLE additems (
@@ -112,8 +119,56 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.
         }
     }
 
+    fun syncFromCloud(onComplete: () -> Unit) {
+        val fs = cloud ?: return
+        fs.collection("customers").get().addOnSuccessListener { snap ->
+            val db = writableDatabase
+            for (doc in snap.documents) {
+                val v = ContentValues().apply {
+                    put("customer_name", doc.getString("name") ?: doc.id)
+                    put("opening_balance", doc.getDouble("opBal") ?: 0.0)
+                    put("address1", doc.getString("address1") ?: "")
+                    put("address2", doc.getString("address2") ?: "")
+                    put("area", doc.getString("area") ?: "")
+                    put("pincode", doc.getString("pincode") ?: "")
+                    put("contact", doc.getString("contact") ?: "")
+                    put("cust_group", doc.getString("group") ?: "")
+                }
+                db.insertWithOnConflict("customer_opening", null, v, SQLiteDatabase.CONFLICT_REPLACE)
+            }
+            fs.collection("sales").get().addOnSuccessListener { sSnap ->
+                for (doc in sSnap.documents) {
+                    val id = doc.id.toLongOrNull() ?: continue
+                    val v = ContentValues().apply {
+                        put("id", id)
+                        put("date", doc.getString("date") ?: "")
+                        put("name", doc.getString("name") ?: "")
+                        put("quantity", doc.getDouble("quantity") ?: 0.0)
+                        put("rate", doc.getDouble("rate") ?: 0.0)
+                        put("amount", doc.getDouble("amount") ?: 0.0)
+                        put("payment_mode", doc.getString("paymentMode") ?: "Credit")
+                    }
+                    db.insertWithOnConflict("additems", null, v, SQLiteDatabase.CONFLICT_REPLACE)
+                }
+                fs.collection("credits").get().addOnSuccessListener { cSnap ->
+                    for (doc in cSnap.documents) {
+                        val id = doc.id.toLongOrNull() ?: continue
+                        val v = ContentValues().apply {
+                            put("id", id)
+                            put("date", doc.getString("date") ?: "")
+                            put("customer_name", doc.getString("customerName") ?: "")
+                            put("payment_mode", doc.getString("paymentMode") ?: "Cash")
+                            put("amount", doc.getDouble("amount") ?: 0.0)
+                        }
+                        db.insertWithOnConflict("credit_received", null, v, SQLiteDatabase.CONFLICT_REPLACE)
+                    }
+                    onComplete()
+                }
+            }
+        }
+    }
+
     fun saveCustomerMaster(c: CustomerMaster) {
-        val db = writableDatabase
         val values = ContentValues().apply {
             put("customer_name", c.name.trim())
             put("opening_balance", c.opBal)
@@ -124,26 +179,29 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.
             put("contact", c.contact)
             put("cust_group", c.group)
         }
-        db.insertWithOnConflict("customer_opening", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        writableDatabase.insertWithOnConflict("customer_opening", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        val data = hashMapOf(
+            "name" to c.name.trim(), "address1" to c.address1, "address2" to c.address2,
+            "area" to c.area, "pincode" to c.pincode, "contact" to c.contact,
+            "group" to c.group, "opBal" to c.opBal
+        )
+        cloud?.collection("customers")?.document(c.name.trim().lowercase())?.set(data)
     }
 
     fun getAllCustomerMasters(): List<CustomerMaster> {
         val list = mutableListOf<CustomerMaster>()
-        val cursor = readableDatabase.rawQuery("SELECT * FROM customer_opening ORDER BY customer_name ASC", null)
-        cursor.use {
+        readableDatabase.rawQuery("SELECT * FROM customer_opening ORDER BY customer_name ASC", null).use {
             while (it.moveToNext()) {
-                list.add(
-                    CustomerMaster(
-                        name = it.getString(it.getColumnIndexOrThrow("customer_name")),
-                        address1 = it.getString(it.getColumnIndexOrThrow("address1")) ?: "",
-                        address2 = it.getString(it.getColumnIndexOrThrow("address2")) ?: "",
-                        area = it.getString(it.getColumnIndexOrThrow("area")) ?: "",
-                        pincode = it.getString(it.getColumnIndexOrThrow("pincode")) ?: "",
-                        contact = it.getString(it.getColumnIndexOrThrow("contact")) ?: "",
-                        group = it.getString(it.getColumnIndexOrThrow("cust_group")) ?: "",
-                        opBal = it.getDouble(it.getColumnIndexOrThrow("opening_balance"))
-                    )
-                )
+                list.add(CustomerMaster(
+                    it.getString(it.getColumnIndexOrThrow("customer_name")),
+                    it.getString(it.getColumnIndexOrThrow("address1")) ?: "",
+                    it.getString(it.getColumnIndexOrThrow("address2")) ?: "",
+                    it.getString(it.getColumnIndexOrThrow("area")) ?: "",
+                    it.getString(it.getColumnIndexOrThrow("pincode")) ?: "",
+                    it.getString(it.getColumnIndexOrThrow("contact")) ?: "",
+                    it.getString(it.getColumnIndexOrThrow("cust_group")) ?: "",
+                    it.getDouble(it.getColumnIndexOrThrow("opening_balance"))
+                ))
             }
         }
         return list
@@ -151,6 +209,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.
 
     fun deleteCustomerMaster(name: String) {
         writableDatabase.delete("customer_opening", "LOWER(customer_name) = LOWER(?)", arrayOf(name.trim()))
+        cloud?.collection("customers")?.document(name.trim().lowercase())?.delete()
     }
 
     fun insertItem(item: LedgerItem): Long {
@@ -162,25 +221,31 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.
             put("amount", item.amount)
             put("payment_mode", item.paymentMode)
         }
-        return writableDatabase.insert("additems", null, values)
+        val id = writableDatabase.insert("additems", null, values)
+        if (id != -1L) {
+            val data = hashMapOf(
+                "id" to id, "date" to item.date, "name" to item.name,
+                "quantity" to item.quantity, "rate" to item.rate,
+                "amount" to item.amount, "paymentMode" to item.paymentMode
+            )
+            cloud?.collection("sales")?.document(id.toString())?.set(data)
+        }
+        return id
     }
 
     fun getAllItems(): List<LedgerItem> {
         val list = mutableListOf<LedgerItem>()
-        val cursor = readableDatabase.rawQuery("SELECT * FROM additems ORDER BY id DESC", null)
-        cursor.use {
+        readableDatabase.rawQuery("SELECT * FROM additems ORDER BY id DESC", null).use {
             while (it.moveToNext()) {
-                list.add(
-                    LedgerItem(
-                        id = it.getLong(it.getColumnIndexOrThrow("id")),
-                        date = it.getString(it.getColumnIndexOrThrow("date")),
-                        name = it.getString(it.getColumnIndexOrThrow("name")),
-                        quantity = it.getDouble(it.getColumnIndexOrThrow("quantity")),
-                        rate = it.getDouble(it.getColumnIndexOrThrow("rate")),
-                        amount = it.getDouble(it.getColumnIndexOrThrow("amount")),
-                        paymentMode = it.getString(it.getColumnIndexOrThrow("payment_mode")) ?: "Credit"
-                    )
-                )
+                list.add(LedgerItem(
+                    it.getLong(it.getColumnIndexOrThrow("id")),
+                    it.getString(it.getColumnIndexOrThrow("date")),
+                    it.getString(it.getColumnIndexOrThrow("name")),
+                    it.getDouble(it.getColumnIndexOrThrow("quantity")),
+                    it.getDouble(it.getColumnIndexOrThrow("rate")),
+                    it.getDouble(it.getColumnIndexOrThrow("amount")),
+                    it.getString(it.getColumnIndexOrThrow("payment_mode")) ?: "Credit"
+                ))
             }
         }
         return list
@@ -188,6 +253,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.
 
     fun deleteItem(id: Long) {
         writableDatabase.delete("additems", "id = ?", arrayOf(id.toString()))
+        cloud?.collection("sales")?.document(id.toString())?.delete()
     }
 
     fun insertCreditReceived(entry: CreditReceivedItem): Long {
@@ -197,23 +263,28 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.
             put("payment_mode", entry.paymentMode)
             put("amount", entry.amount)
         }
-        return writableDatabase.insert("credit_received", null, values)
+        val id = writableDatabase.insert("credit_received", null, values)
+        if (id != -1L) {
+            val data = hashMapOf(
+                "id" to id, "date" to entry.date, "customerName" to entry.customerName,
+                "paymentMode" to entry.paymentMode, "amount" to entry.amount
+            )
+            cloud?.collection("credits")?.document(id.toString())?.set(data)
+        }
+        return id
     }
 
     fun getAllCreditReceived(): List<CreditReceivedItem> {
         val list = mutableListOf<CreditReceivedItem>()
-        val cursor = readableDatabase.rawQuery("SELECT * FROM credit_received ORDER BY id DESC", null)
-        cursor.use {
+        readableDatabase.rawQuery("SELECT * FROM credit_received ORDER BY id DESC", null).use {
             while (it.moveToNext()) {
-                list.add(
-                    CreditReceivedItem(
-                        id = it.getLong(it.getColumnIndexOrThrow("id")),
-                        date = it.getString(it.getColumnIndexOrThrow("date")),
-                        customerName = it.getString(it.getColumnIndexOrThrow("customer_name")),
-                        paymentMode = it.getString(it.getColumnIndexOrThrow("payment_mode")),
-                        amount = it.getDouble(it.getColumnIndexOrThrow("amount"))
-                    )
-                )
+                list.add(CreditReceivedItem(
+                    it.getLong(it.getColumnIndexOrThrow("id")),
+                    it.getString(it.getColumnIndexOrThrow("date")),
+                    it.getString(it.getColumnIndexOrThrow("customer_name")),
+                    it.getString(it.getColumnIndexOrThrow("payment_mode")),
+                    it.getDouble(it.getColumnIndexOrThrow("amount"))
+                ))
             }
         }
         return list
@@ -221,6 +292,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.
 
     fun deleteCreditReceived(id: Long) {
         writableDatabase.delete("credit_received", "id = ?", arrayOf(id.toString()))
+        cloud?.collection("credits")?.document(id.toString())?.delete()
     }
 
     fun getDistinctCreditCustomers(): List<String> {
@@ -257,12 +329,12 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.
     }
 
     fun setOpeningBalance(customerName: String, amount: Double) {
-        val db = writableDatabase
         val clean = customerName.trim()
-        db.execSQL(
+        writableDatabase.execSQL(
             "INSERT INTO customer_opening (customer_name, opening_balance) VALUES (?, ?) ON CONFLICT(customer_name) DO UPDATE SET opening_balance = excluded.opening_balance",
             arrayOf(clean, amount)
         )
+        cloud?.collection("customers")?.document(clean.lowercase())?.set(hashMapOf("name" to clean, "opBal" to amount))
     }
 
     fun getCustomerStatement(customerName: String, fromDate: String, toDate: String): CustomerStatementReport {
@@ -287,14 +359,10 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, "DailyLedger.
         val events = mutableListOf<RawEvent>()
 
         db.rawQuery("SELECT date, quantity, rate, amount FROM additems WHERE LOWER(TRIM(name)) = LOWER(?) AND payment_mode = 'Credit' AND date BETWEEN ? AND ?", arrayOf(clean, fromDate, toDate)).use {
-            while (it.moveToNext()) {
-                events.add(RawEvent(it.getString(0), it.getDouble(1), it.getDouble(2), it.getDouble(3), 0.0, 1))
-            }
+            while (it.moveToNext()) events.add(RawEvent(it.getString(0), it.getDouble(1), it.getDouble(2), it.getDouble(3), 0.0, 1))
         }
         db.rawQuery("SELECT date, amount FROM credit_received WHERE LOWER(TRIM(customer_name)) = LOWER(?) AND date BETWEEN ? AND ?", arrayOf(clean, fromDate, toDate)).use {
-            while (it.moveToNext()) {
-                events.add(RawEvent(it.getString(0), 0.0, 0.0, 0.0, it.getDouble(1), 2))
-            }
+            while (it.moveToNext()) events.add(RawEvent(it.getString(0), 0.0, 0.0, 0.0, it.getDouble(1), 2))
         }
 
         val sortedEvents = events.sortedWith(compareBy({ it.date }, { it.sortOrder }))
