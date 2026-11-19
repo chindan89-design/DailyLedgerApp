@@ -26,6 +26,11 @@
             android:exported="false"
             android:label="Closing Sheet (கணக்கு அறிக்கை)" />
 
+        <activity
+            android:name=".CustomerCreationActivity"
+            android:exported="false"
+            android:label="Customer Creation" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
