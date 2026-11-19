@@ -36,7 +36,6 @@ class ClosingSheetActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         try {
             setContentView(R.layout.activity_closing_sheet)
-
             dbHelper = DatabaseHelper(this)
 
             rgReportMode = findViewById(R.id.rgReportMode)
@@ -62,12 +61,12 @@ class ClosingSheetActivity : AppCompatActivity() {
             etFromDate.setOnClickListener { showDatePicker(etFromDate) }
             etToDate.setOnClickListener { showDatePicker(etToDate) }
 
-            refreshCustomerAutocomplete()
+            refreshAutocomplete()
 
             rgReportMode.setOnCheckedChangeListener { _, checkedId ->
                 if (checkedId == R.id.rbSingleCustomer) {
                     actvSearchCustomer.visibility = View.VISIBLE
-                    tvReportHeader.text = "Select Customer & Date Range"
+                    tvReportHeader.text = "Select Customer"
                     tlReportTable.removeAllViews()
                     llTableHeader.removeAllViews()
                 } else {
@@ -77,76 +76,83 @@ class ClosingSheetActivity : AppCompatActivity() {
             }
 
             actvSearchCustomer.setOnItemClickListener { _, _, _, _ -> generateReport() }
-
             btnGenerateReport.setOnClickListener { generateReport() }
-            btnSetOpening.setOnClickListener { showOpeningBalanceDialog() }
-            btnExportReport.setOnClickListener { exportReportToCsv() }
+            btnSetOpening.setOnClickListener { showOpeningDialog() }
+            btnExportReport.setOnClickListener { exportCsv() }
         } catch (e: Exception) {
-            Toast.makeText(this, "Closing Sheet Error: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
-    private fun refreshCustomerAutocomplete() {
-        val customers = dbHelper.getDistinctCreditCustomers()
-        actvSearchCustomer.setAdapter(
-            ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, customers)
-        )
+    private fun refreshAutocomplete() {
+        val list = dbHelper.getDistinctCreditCustomers()
+        actvSearchCustomer.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, list))
     }
 
-    private fun showDatePicker(targetEditText: EditText) {
+    private fun showDatePicker(target: EditText) {
         val cal = Calendar.getInstance()
-        DatePickerDialog(
-            this,
-            { _, year, month, day ->
-                targetEditText.setText(String.format(Locale.US, "%04d-%02d-%02d", year, month + 1, day))
-                if (rbAllCustomers.isChecked || actvSearchCustomer.text.isNotEmpty()) {
-                    generateReport()
-                }
-            },
-            cal.get(Calendar.YEAR),
-            cal.get(Calendar.MONTH),
-            cal.get(Calendar.DAY_OF_MONTH)
-        ).show()
+        DatePickerDialog(this, { _, y, m, d ->
+            target.setText(String.format(Locale.US, "%04d-%02d-%02d", y, m + 1, d))
+            if (rbAllCustomers.isChecked || actvSearchCustomer.text.isNotEmpty()) generateReport()
+        }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
     }
 
     private fun generateReport() {
         val fromDate = etFromDate.text.toString().trim()
         val toDate = etToDate.text.toString().trim()
-
         if (rbSingleCustomer.isChecked) {
-            val customer = actvSearchCustomer.text.toString().trim()
-            if (customer.isEmpty()) {
+            val cust = actvSearchCustomer.text.toString().trim()
+            if (cust.isEmpty()) {
                 Toast.makeText(this, "Enter Customer Name", Toast.LENGTH_SHORT).show()
                 return
             }
-            renderSingleCustomerStatement(customer, fromDate, toDate)
+            renderSingle(cust, fromDate, toDate)
         } else {
-            renderAllCustomersSummary(fromDate, toDate)
+            renderAll(fromDate, toDate)
         }
     }
 
-    private fun renderSingleCustomerStatement(customer: String, fromDate: String, toDate: String) {
-        val report = dbHelper.getCustomerStatement(customer, fromDate, toDate)
+    private fun renderSingle(cust: String, fromDate: String, toDate: String) {
+        val report = dbHelper.getCustomerStatement(cust, fromDate, toDate)
         currentSingleReport = report
         currentAllReport = emptyList()
-
-        tvReportHeader.text =
-            "Customer: ${report.customerName}  \vert{}  Opening Bal: ₹${formatNum(report.openingBalance)}"
+        tvReportHeader.text = "${report.customerName} \vert{} Open:${fmt(report.openingBalance)}"
 
         llTableHeader.removeAllViews()
-        llTableHeader.addView(createHeaderCell("Date", 1.3f, Gravity.START))
-        llTableHeader.addView(createHeaderCell("Qty", 0.8f, Gravity.END))
-        llTableHeader.addView(createHeaderCell("Rate", 0.8f, Gravity.END))
-        llTableHeader.addView(createHeaderCell("Amount", 1.1f, Gravity.END))
-        llTableHeader.addView(createHeaderCell("Recvd", 1.1f, Gravity.END))
-        llTableHeader.addView(createHeaderCell("Closing", 1.2f, Gravity.END))
+        llTableHeader.addView(hCell("Date", 1.3f, Gravity.START))
+        llTableHeader.addView(hCell("Qty", 0.8f, Gravity.END))
+        llTableHeader.addView(hCell("Rate", 0.8f, Gravity.END))
+        llTableHeader.addView(hCell("Amt", 1.1f, Gravity.END))
+        llTableHeader.addView(hCell("Rec", 1.1f, Gravity.END))
+        llTableHeader.addView(hCell("Close", 1.2f, Gravity.END))
 
         tlReportTable.removeAllViews()
-        report.rows.forEachIndexed { index, row ->
-            val tr = TableRow(this).apply {
-                setBackgroundColor(if (index % 2 == 0) Color.WHITE else Color.parseColor("#F4F7F7"))
-                setPadding(6, 10, 6, 10)
-            }
-            val shortDate = if (row.date.length >= 10) row.date.substring(5) else row.date
-            tr.addView(createDataCell(shortDate, 1.3f, Gravity.START, false))
-            tr.addView(createDataCell(if (
+        report.rows.forEachIndexed { i, r ->
+            val tr = TableRow(this)
+            tr.setBackgroundColor(if (i % 2 == 0) Color.WHITE else Color.parseColor("#F4F7F7"))
+            tr.setPadding(6, 10, 6, 10)
+            val dt = if (r.date.length >= 10) r.date.substring(5) else r.date
+            tr.addView(dCell(dt, 1.3f, Gravity.START, false))
+            tr.addView(dCell(if (r.quantity > 0) fmt(r.quantity) else "-", 0.8f, Gravity.END, false))
+            tr.addView(dCell(if (r.rate > 0) fmt(r.rate) else "-", 0.8f, Gravity.END, false))
+            tr.addView(dCell(if (r.amount > 0) fmt(r.amount) else "-", 1.1f, Gravity.END, false))
+            tr.addView(dCell(if (r.receivedAmount > 0) fmt(r.receivedAmount) else "-", 1.1f, Gravity.END, false))
+            tr.addView(dCell(fmt(r.closingBalance), 1.2f, Gravity.END, true))
+            tlReportTable.addView(tr)
+        }
+
+        val tQty = report.rows.sumOf { it.quantity }
+        val tSales = report.rows.sumOf { it.amount }
+        val tRec = report.rows.sumOf { it.receivedAmount }
+        tvReportTotals.text = "Qty: ${fmt(tQty)} \vert{} Sales:${fmt(tSales)} | Rec: ${fmt(tRec)} \vert{} Close:${fmt(report.finalClosingBalance)}"
+    }
+
+    private fun renderAll(fromDate: String, toDate: String) {
+        val list = dbHelper.getAllCustomersClosingRange(fromDate, toDate)
+        currentAllReport = list
+        currentSingleReport = null
+        tvReportHeader.text = "All Customers ($fromDate to$toDate)"
+
+        llTableHeader.removeAllViews()
+        llTableHeader.addView(hCell("Name", 1.5f, Gravity.START))
+        llTableHeader.
