@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="14dp">
+
+    <Button
+        android:id="@+id/btnGoClosingFromCr"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="3. Open Closing Sheet →"
+        android:textSize="12sp" />
+
+    <EditText
+        android:id="@+id/etCrDate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:clickable="true"
+        android:focusable="false"
+        android:hint="Date (YYYY-MM-DD)"
+        android:inputType="none" />
+
+    <AutoCompleteTextView
+        android:id="@+id/actvCustomerName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:completionThreshold="1"
+        android:hint="Customer Name (வாடிக்கையாளர் பெயர்)"
+        android:inputType="textPersonName" />
+
+    <TextView
+        android:id="@+id/tvCustomerBalance"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Pending Credit Balance: ₹0"
+        android:textColor="#1B5E20"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
+    <RadioGroup
+        android:id="@+id/rgCrPaymentMode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
+
+        <RadioButton
+            android:id="@+id/rbByCash"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:checked="true"
+            android:text="By Cash" />
+
+        <RadioButton
+            android:id="@+id/rbByBank"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="By Bank" />
+
+        <RadioButton
+            android:id="@+id/rbByAdjustment"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="By Adjustment" />
+    </RadioGroup>
+
+    <EditText
+        android:id="@+id/etCrAmount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="Received Amount (₹)"
+        android:inputType="numberDecimal"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/btnSaveCredit"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Save Receipt" />
+
+        <Button
+            android:id="@+id/btnExportCredit"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:text="Export Excel" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvCrSummary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:background="#E3F2FD"
+        android:padding="8dp"
+        android:text="Total Received: ₹0 | Cash: ₹0 | Bank: ₹0 | Adj: ₹0"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <ListView
+        android:id="@+id/lvCreditItems"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1" />
+</LinearLayout>
